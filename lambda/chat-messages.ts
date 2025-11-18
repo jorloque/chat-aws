@@ -1,59 +1,54 @@
-import { DynamoDBClient, QueryCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { PutCommand, DynamoDBDocumentClient } from "@aws-sdk/lib-dynamodb";
 
 const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
+const TABLE_NAME = process.env.TABLE_NAME || "ChatMessages";
 
 export const handler = async (event) => {
-  // Headers CORS
-  const headers = {
-    "Content-Type": "application/json", 
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type"
+  console.log("EVENT:", JSON.stringify(event, null, 2));
+
+  let { user, text, room } = event;
+
+  if ((!user || !text) && event.body) {
+    try {
+      const body =
+        typeof event.body === "string"
+          ? JSON.parse(event.body)
+          : event.body;
+      user = body.user;
+      text = body.text;
+      room = body.room;
+    } catch {
+      return {
+        statusCode: 400,
+        body: JSON.stringify({ error: "JSON inválido" }),
+      };
+    }
+  }
+
+  if (!user || !text) {
+    return {
+      statusCode: 400,
+      body: JSON.stringify({ error: "user y text son obligatorios" }),
+    };
+  }
+
+  if (!room) room = "general"; // 👈 agregado
+
+  const timestamp = Date.now();
+  const message = { room, timestamp, user, text };
+
+  await docClient.send(
+    new PutCommand({
+      TableName: TABLE_NAME,
+      Item: message,
+    })
+  );
+
+  return {
+    statusCode: 200,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status: "saved", message }),
   };
-
-  // Manejar preflight OPTIONS
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 200,
-      headers,
-      body: ''
-    };
-  }
-
-  const room = event.queryStringParameters?.room || "general";
-  const limit = parseInt(event.queryStringParameters?.limit || "20", 10);
-
-  try {
-    const result = await client.send(
-      new QueryCommand({
-        TableName: "ChatMessages",
-        KeyConditionExpression: "room = :room",
-        ExpressionAttributeValues: {
-          ":room": { S: room },
-        },
-        ScanIndexForward: false,
-        Limit: limit,
-      })
-    );
-
-    const messages = (result.Items || []).map((item) => ({
-      room: item.room.S,
-      timestamp: Number(item.timestamp.N),
-      user: item.user.S,
-      text: item.text.S,
-    }));
-
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ messages }),
-    };
-  } catch (err) {
-    console.error(err);
-    return {
-      statusCode: 500,
-      headers, 
-      body: JSON.strixngify({ error: "Error leyendo mensajes" }),
-    };
-  }
 };

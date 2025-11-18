@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat AWS</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #fafafa;
+      padding: 20px;
+    }
+    #messages {
+      background: white;
+      border: 1px solid #ccc;
+      padding: 10px;
+      height: 300px;
+      overflow-y: auto;
+      margin-bottom: 20px;
+    }
+    input, button {
+      font-size: 16px;
+      padding: 8px;
+      margin: 5px 0;
+    }
+    button {
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>Chat AWS 💬</h1>
+
+  <div id="messages"></div>
+
+  <label>Usuario:</label><br />
+  <input id="user" type="text" placeholder="Tu nombre" /><br />
+
+  <label>Mensaje:</label><br />
+  <input id="text" type="text" placeholder="Escribe un mensaje..." /><br />
+
+  <button onclick="sendMessage()">Enviar</button>
+
+  <script>
+    const API_BASE = "https://4iqi63mxge.execute-api.us-east-1.amazonaws.com/dev"; // CAMBIAR
+
+    async function sendMessage() {
+      const user = document.getElementById("user").value;
+      const text = document.getElementById("text").value;
+
+      if (!user || !text) return alert("Usuario y mensaje son obligatorios");
+
+      const res = await fetch(`${API_BASE}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user, text, room: "general" }),
+      });
+
+      const data = await res.json();
+      console.log("Enviado:", data);
+      document.getElementById("text").value = ""; // limpiar input
+      loadMessages();
+    }
+
+    async function loadMessages() {
+      try {
+        const res = await fetch(`${API_BASE}/messages?room=general&limit=20`);
+        const data = await res.json();
+
+        const container = document.getElementById("messages");
+        container.innerHTML = ""; // limpiar
+
+        (data.messages || [])
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .forEach((msg) => {
+            const p = document.createElement("p");
+            const date = new Date(msg.timestamp).toLocaleTimeString();
+            p.textContent = `[${date}] ${msg.user}: ${msg.text}`;
+            container.appendChild(p);
+          });
+      } catch (e) {
+        console.error("Error cargando mensajes:", e);
+      }
+    }
+
+    // refrescar cada 5 segundos
+    setInterval(loadMessages, 5000);
+    loadMessages(); // cargar al abrir
+  </script>
+</body>
+</html>
