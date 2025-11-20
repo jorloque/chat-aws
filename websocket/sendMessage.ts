@@ -1,41 +1,82 @@
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+  ScanCommand,
+  DeleteItemCommand
+} from "@aws-sdk/client-dynamodb";
+
 import { ApiGatewayManagementApi } from "@aws-sdk/client-apigatewaymanagementapi";
 
+const ddb = new DynamoDBClient({});
+const CONNECTIONS_TABLE = "ChatConnections";
+const MESSAGES_TABLE = "ChatMessages";
+const ROOM_ID = "general";
+
 export const handler = async (event) => {
-  console.log("Evento recibido:", JSON.stringify(event, null, 2));
+  console.log("SEND MESSAGE:", JSON.stringify(event, null, 2));
 
-  const { requestContext, body } = event;
+  const { connectionId, domainName, stage } = event.requestContext;
 
-  let parsedBody = {};
+  // Parsear body
+  let body;
+  try { body = JSON.parse(event.body); }
+  catch { body = { data: event.body }; }
 
-  // Parseo tolerante
-  try {
-    parsedBody = JSON.parse(body);
-  } catch (err) {
-    console.log("Body no es JSON, lo tratamos como texto.");
-    parsedBody.data = body;
-  }
+  const text = body.data?.trim() || "";
+  if (!text) return { statusCode: 400 };
 
-  const message = parsedBody.data || "mensaje vacío";
+  // Obtener username correcto
+  const userItem = await ddb.send(new GetItemCommand({
+    TableName: CONNECTIONS_TABLE,
+    Key: { connectionId: { S: connectionId } }
+  }));
 
-  const domain = requestContext.domainName;
-  const stage = requestContext.stage;
+  const username = userItem.Item?.username?.S || "Anon";
+
+  const createdAt = new Date().toISOString();
+
+  // Guardar mensaje
+  await ddb.send(new PutItemCommand({
+    TableName: MESSAGES_TABLE,
+    Item: {
+      roomId: { S: ROOM_ID },
+      createdAt: { S: createdAt },
+      user: { S: username },
+      text: { S: text }
+    }
+  }));
+
+  // Obtener todas las conexiones activas
+  const conns = await ddb.send(new ScanCommand({
+    TableName: CONNECTIONS_TABLE
+  }));
 
   const apiGw = new ApiGatewayManagementApi({
-    endpoint: `https://${domain}/${stage}`,
+    endpoint: `https://${domainName}/${stage}`
   });
 
-  try {
-    await apiGw.postToConnection({
-      ConnectionId: requestContext.connectionId,
-      Data: Buffer.from(`Echo: ${message}`)
-    });
+  const msg = {
+    type: "message",
+    user: username,
+    text,
+    createdAt
+  };
 
-    return { statusCode: 200 };
-  } catch (err) {
-    console.error("ERROR al enviar mensaje:", err);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({ error: "Failed to send message" }),
-    };
+  // Broadcast
+  for (const conn of conns.Items) {
+    try {
+      await apiGw.postToConnection({
+        ConnectionId: conn.connectionId.S,
+        Data: Buffer.from(JSON.stringify(msg))
+      });
+    } catch (err) {
+      await ddb.send(new DeleteItemCommand({
+        TableName: CONNECTIONS_TABLE,
+        Key: { connectionId: { S: conn.connectionId.S } }
+      }));
+    }
   }
+
+  return { statusCode: 200 };
 };

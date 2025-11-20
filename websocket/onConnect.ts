@@ -1,16 +1,35 @@
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
 
-const dynamo = new DynamoDBClient({});
+const ddb = new DynamoDBClient({});
+const TABLE = "ChatConnections";
 
 export const handler = async (event) => {
-  const connectionId = event.requestContext.connectionId;
+  console.log("ON CONNECT:", JSON.stringify(event, null, 2));
 
-  await dynamo.send(
-    new PutItemCommand({
-      TableName: "ChatConnections",
-      Item: { connectionId: { S: connectionId } }
-    })
-  );
+  try {
+    const { connectionId } = event.requestContext;
+    const username = event.queryStringParameters?.user || "Anon";
 
-  return { statusCode: 200 };
+    // Guardar conexión
+    await ddb.send(new PutItemCommand({
+      TableName: TABLE,
+      Item: {
+        connectionId: { S: connectionId },
+        username:     { S: username }
+      }
+    }));
+
+    return {
+      statusCode: 200,
+      body: ""  // <-- IMPORTANTE
+    };
+
+  } catch (err) {
+    console.error("ERROR onConnect:", err);
+
+    return {
+      statusCode: 500,
+      body: "Error onConnect"
+    };
+  }
 };
